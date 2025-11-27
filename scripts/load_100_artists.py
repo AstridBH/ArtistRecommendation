@@ -1,10 +1,13 @@
-import sqlite3
+import mysql.connector
 import random
+import os
+import itertools 
+from dotenv import load_dotenv
 
-DB_PATH = "data/artists.db"
+load_dotenv()
 
 # ==========================================
-# 1. BANCO DE DATOS EXTENDIDO
+# 1. DATOS FUENTE (Vocabulario)
 # ==========================================
 
 first_names = [
@@ -13,7 +16,7 @@ first_names = [
     "Amara", "Dimitri", "Sven", "Fatima", "Wei", "Priya", "Carlos", "Ximena", "Ravi",
     "Julian", "Alice", "Hugo", "Luna", "Ethan", "Mia", "Omar", "Nadia", "Kaito",
     "Renata", "Bruno", "Lila", "Axel", "Keira", "Tariq", "Nina", "Oscar", "Jasmine",
-    "Victor", "Hana", "Sergio", "Diana", "Ivan"
+    "Victor", "Hana", "Sergio", "Diana", "Ivan", "Mika", "Arjun", "Lara", "Emil"
 ]
 
 last_names = [
@@ -23,150 +26,127 @@ last_names = [
     "Schmidt", "Suzuki", "Bernard", "Davies", "Lefevre", "Costa", "Novak", "Ali",
     "Gomez", "Chang", "Weber", "Hansen", "Wagner", "Fernandez", "Sokolov", "Mendoza",
     "Dupont", "Schneider", "Yamamoto", "Díaz", "Cameron", "Fischer", "Russo", "Ferrari",
-    "Romero", "Bennet"
+    "Romero", "Bennet", "Li", "Khan", "Lewis", "Clark"
 ]
 
-# Estructura de perfiles con vocabulario específico
+# Perfiles semánticos para descripciones
 artist_profiles = {
     "Manga & Anime": {
-        "styles": ["Shonen de acción", "Shojo romántico", "Seinen oscuro", "Cyberpunk Anime", "Chibi Kawaii", "Manga Gekiga"],
-        "techniques": ["entintado digital nítido", "tramas (screentones)", "colores planos vibrantes", "líneas cinéticas", "cel shading"],
-        "subjects": ["peleas dinámicas", "vida escolar", "mechas y robots", "expresiones exageradas", "idols virtuales"],
+        "styles": ["Shonen", "Shojo", "Seinen", "Cyberpunk", "Chibi", "Gekiga", "Mecha"],
+        "techniques": ["entintado digital", "tramas", "colores planos", "líneas cinéticas", "cel shading"],
+        "subjects": ["peleas", "vida escolar", "robots", "expresiones", "idols"],
         "vibe": ["enérgico", "emotivo", "intenso", "nostálgico", "futurista"]
     },
     "Ilustración Infantil": {
-        "styles": ["Cuento de hadas", "Libro álbum", "Didáctico", "Fantasía suave", "Pop-up art"],
-        "techniques": ["acuarela tradicional", "lápices de colores", "pastel suave", "gouache", "collage de papel"],
-        "subjects": ["animales antropomórficos", "bosques encantados", "situaciones cotidianas tiernas", "alfabetos ilustrados"],
+        "styles": ["Cuento de hadas", "Libro álbum", "Didáctico", "Fantasía suave", "Pop-up"],
+        "techniques": ["acuarela", "lápices de colores", "pastel", "gouache", "collage"],
+        "subjects": ["animales", "bosques", "niños", "alfabetos", "juguetes"],
         "vibe": ["cálido", "inocente", "onírico", "educativo", "juguetón"]
     },
     "Concept Art & Sci-Fi": {
         "styles": ["Hard Surface", "Cyberpunk", "Space Opera", "Post-apocalíptico", "Solarpunk"],
-        "techniques": ["photobashing", "pintura digital realista", "modelado 3D paintover", "iluminación volumétrica", "matte painting"],
-        "subjects": ["ciudades futuristas", "vehículos espaciales", "diseño de armas", "entornos distópicos", "tecnología alienígena"],
-        "vibe": ["cinematográfico", "tecnológico", "misterioso", "colosal", "frío y calculador"]
+        "techniques": ["photobashing", "pintura digital", "3D paintover", "iluminación volumétrica"],
+        "subjects": ["ciudades", "naves", "armas", "distopías", "aliens"],
+        "vibe": ["cinematográfico", "tecnológico", "misterioso", "colosal", "frío"]
     },
-    "Fantasía Épica & RPG": {
-        "styles": ["Alta Fantasía", "Dark Fantasy", "Realismo Mágico", "Estilo D&D", "Grimdark"],
-        "techniques": ["óleo digital", "pinceladas texturizadas", "claroscuro dramático", "técnica mixta"],
-        "subjects": ["guerreros y magos", "dragones y bestias", "ruinas antiguas", "mapas de mundos", "artefactos mágicos"],
+    "Fantasía Épica": {
+        "styles": ["Alta Fantasía", "Dark Fantasy", "Realismo Mágico", "RPG Style"],
+        "techniques": ["óleo digital", "pinceladas texturizadas", "claroscuro", "técnica mixta"],
+        "subjects": ["guerreros", "dragones", "ruinas", "mapas", "magia"],
         "vibe": ["épico", "oscuro", "majestuoso", "legendario", "ancestral"]
     },
-    "Cómic Noir & Urbano": {
-        "styles": ["Novela gráfica Noir", "Underground", "Periodismo gráfico", "Slice of Life"],
-        "techniques": ["tinta china alto contraste", "blanco y negro estricto", "sketchy lines", "trama de puntos"],
-        "subjects": ["escenas de crimen", "vida nocturna urbana", "detectives privados", "crítica social", "arquitectura moderna"],
+    "Cómic Noir": {
+        "styles": ["Noir", "Underground", "Periodismo gráfico", "Slice of Life"],
+        "techniques": ["tinta alto contraste", "blanco y negro", "sketchy lines", "puntillismo"],
+        "subjects": ["crimen", "noche", "detectives", "crítica social", "ciudad"],
         "vibe": ["melancólico", "crudo", "adulto", "sarcástico", "reflexivo"]
     }
 }
 
-# Conectores para variar la sintaxis (Estructura gramatical)
-openers = [
-    "Artista experto en", "Ilustrador enfocado en", "Creador visual especializado en",
-    "Diseñador con pasión por", "Talento emergente en el mundo del", "Profesional dedicado al"
-]
-
-connectors = [
-    "que utiliza principalmente", "destacando por su uso de", "dominando la técnica de",
-    "famoso por emplear", "experimentando con"
-]
-
-closers = [
-    "para crear obras de", "dando vida a", "enfocándose en representar",
-    "narrando historias visuales sobre", "explorando temáticas como"
-]
+openers = ["Experto en", "Especialista en", "Creador de", "Diseñador de", "Ilustrador de"]
+connectors = ["usando", "con dominio de", "aplicando", "mediante"]
+closers = ["para proyectos de", "enfocado en", "explorando temas de", "dando vida a"]
 
 # ==========================================
-# 2. LÓGICA DE GENERACIÓN ÚNICA
+# 2. GENERACIÓN OPTIMIZADA
 # ==========================================
 
-def generate_unique_name(existing_names):
-    """Genera un nombre que no exista en el set 'existing_names'."""
-    while True:
-        name = f"{random.choice(first_names)} {random.choice(last_names)}"
-        if name not in existing_names:
-            existing_names.add(name)
-            return name
+def get_db_connection():
+    return mysql.connector.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        user=os.getenv("DB_USER", "root"),
+        password=os.getenv("DB_PASSWORD", ""),
+        database=os.getenv("DB_NAME", "art_collab_db"),
+        port=os.getenv("DB_PORT", 3306)
+    )
 
-def generate_unique_description(profile_data, existing_descriptions):
-    """Genera una descripción semántica única evitando duplicados exactos."""
-    max_attempts = 50
-    attempts = 0
+def generate_fast_description():
+    """Genera una descripción linealmente (O(1)) sin check de unicidad (baja probabilidad de colisión)."""
+    category_name = random.choice(list(artist_profiles.keys()))
+    p = artist_profiles[category_name]
     
-    while attempts < max_attempts:
-        attempts += 1
+    # Construcción dinámica
+    return (f"{random.choice(openers)} {random.choice(p['styles'])} {random.choice(connectors)} "
+            f"{random.choice(p['techniques'])}. Su estilo {random.choice(p['vibe'])} es ideal {random.choice(closers)} "
+            f"{random.choice(p['subjects'])}.")
+
+def generate_artists(n=1000):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        print("Conectado a MySQL...")
+
+        # 1. Preparar DB
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS artists (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                description TEXT NOT NULL,
+                image_path VARCHAR(255)
+            )
+        """)
+        cursor.execute("TRUNCATE TABLE artists") # Limpieza rápida
+        print("Tabla limpiada.")
+
+        # 2. GENERACIÓN MASIVA DE NOMBRES (Estrategia: Producto Cartesiano)
+        # Esto crea TODAS las combinaciones posibles (aprox 2900 con las listas actuales)
+        # Es instantáneo en memoria.
+        all_possible_names = [f"{f} {l}" for f, l in itertools.product(first_names, last_names)]
         
-        # Selección aleatoria de componentes
-        style = random.choice(profile_data["styles"])
-        tech = random.choice(profile_data["techniques"])
-        subj = random.choice(profile_data["subjects"])
-        vibe = random.choice(profile_data["vibe"])
-        
-        opener = random.choice(openers)
-        conn = random.choice(connectors)
-        closer = random.choice(closers)
-        
-        # Estructuras de oración variadas
-        structures = [
-            f"{opener} {style}, {conn} {tech}. Su trabajo tiene un tono {vibe}, {closer} {subj}.",
-            f"Su portafolio destaca por un estilo {style} {vibe}. {opener} {tech} {closer} {subj}.",
-            f"Conocido por {subj} bajo una estética {style}. Es un {opener.lower()} {tech} con atmósfera {vibe}.",
-            f"{vibe.capitalize()} y detallista. {opener} {style} usando {tech} para plasmar {subj}."
+        # Validar si pedimos más de lo que existe
+        if n > len(all_possible_names):
+            print(f"Advertencia: Se pidieron {n} nombres únicos pero solo hay {len(all_possible_names)} combinaciones posibles.")
+            print("Se permitirán duplicados para completar.")
+            # Rellenar con duplicados si es necesario
+            selection = all_possible_names + random.choices(all_possible_names, k=n-len(all_possible_names))
+        else:
+            # Seleccionar N únicos al azar sin bucles de reintento
+            selection = random.sample(all_possible_names, n)
+
+        print(f"Generando datos para {len(selection)} artistas...")
+
+        # 3. Construir lista de tuplas para inserción
+        # Generamos las descripciones al vuelo dentro de la comprensión de lista
+        artists_data = [
+            (name, generate_fast_description()) 
+            for name in selection
         ]
+
+        # 4. INSERCIÓN BATCH (Súper rápida)
+        sql = "INSERT INTO artists (name, description) VALUES (%s, %s)"
         
-        desc = random.choice(structures)
+        # Insertar en bloques de 1000
+        cursor.executemany(sql, artists_data)
+        conn.commit()
         
-        if desc not in existing_descriptions:
-            existing_descriptions.add(desc)
-            return desc
-            
-    # Fallback por si acaso (muy raro que pase con tantas combinaciones)
-    return f"Especialista en {style} y {subj}."
+        print(f"¡Terminado! {cursor.rowcount} artistas insertados.")
 
-def generate_artists(n=100):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Crear tabla si no existe (incluyendo el campo image_path por compatibilidad)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS artists (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL,
-            image_path TEXT
-        )
-    """)
-    
-    # Limpiar tabla para evitar mezclar datos viejos con nuevos
-    cursor.execute("DELETE FROM artists")
-    cursor.execute("DELETE FROM sqlite_sequence WHERE name='artists'") # Resetear ID
-    print("Base de datos limpiada y lista.")
-
-    # Sets para control de unicidad
-    generated_names = set()
-    generated_descriptions = set()
-
-    print(f"Generando {n} perfiles únicos y diversos...")
-
-    for _ in range(n):
-        # 1. Nombre Único
-        name = generate_unique_name(generated_names)
-        
-        # 2. Elegir Arquetipo
-        category_name = random.choice(list(artist_profiles.keys()))
-        profile_data = artist_profiles[category_name]
-        
-        # 3. Descripción Única y Compleja
-        description = generate_unique_description(profile_data, generated_descriptions)
-        
-        cursor.execute(
-            "INSERT INTO artists (name, description) VALUES (?, ?)",
-            (name, description)
-        )
-
-    conn.commit()
-    conn.close()
-    print(f"¡Proceso finalizado! {n} artistas creados sin duplicados.")
+    except mysql.connector.Error as err:
+        print(f"Error de MySQL: {err}")
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
 
 if __name__ == "__main__":
     generate_artists(1000)

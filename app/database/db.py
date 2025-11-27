@@ -1,85 +1,104 @@
-import sqlite3
+import mysql.connector
+import os
+from dotenv import load_dotenv
 
-DB_PATH = "data/artists.db"
+# Cargar variables de entorno
+load_dotenv()
 
-# Función de ayuda para obtener la conexión
 def get_db_connection():
-    return sqlite3.connect(DB_PATH)
+    """Establece la conexión a MySQL usando variables de entorno."""
+    return mysql.connector.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        user=os.getenv("DB_USER", "root"),
+        password=os.getenv("DB_PASSWORD", ""),
+        database=os.getenv("DB_NAME", "art_collab_db"),
+        port=os.getenv("DB_PORT", 3306)
+    )
 
 # ===============================================
-# READ (Lectura de Artistas)
+# READ
 # ===============================================
 
 def get_artists():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Asumimos que la tabla tiene al menos id, name y description
-    cursor.execute("SELECT id, name, description FROM artists") 
+    cursor.execute("SELECT id, name, description, image_path FROM artists")
     rows = cursor.fetchall()
     conn.close()
 
     return [
-        {"id": row[0], "name": row[1], "description": row[2]}
+        {"id": row[0], "name": row[1], "description": row[2], "image_path": row[3]}
         for row in rows
     ]
 
 def get_artist_by_id(artist_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, description FROM artists WHERE id = ?", (artist_id,))
+    cursor.execute("SELECT id, name, description, image_path FROM artists WHERE id = %s", (artist_id,))
     row = cursor.fetchone()
     conn.close()
     
     if row:
-        return {"id": row[0], "name": row[1], "description": row[2]}
+        return {"id": row[0], "name": row[1], "description": row[2], "image_path": row[3]}
     return None
 
 # ===============================================
-# CREATE (Creación de Artistas)
+# CREATE
 # ===============================================
 
-def create_artist(name: str, description: str):
+def create_artist(name: str, description: str, image_path: str = None):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(
-            "INSERT INTO artists (name, description) VALUES (?, ?)",
-            (name, description)
-        )
-        artist_id = cursor.lastrowid
+        sql = "INSERT INTO artists (name, description, image_path) VALUES (%s, %s, %s)"
+        val = (name, description, image_path)
+        cursor.execute(sql, val)
+        
         conn.commit()
+        artist_id = cursor.lastrowid
         return artist_id
-    except sqlite3.IntegrityError:
-        # En caso de que se añadan restricciones de unicidad en el futuro
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
         return None 
     finally:
         conn.close()
 
 # ===============================================
-# UPDATE (Actualización de Artistas)
+# UPDATE
 # ===============================================
 
 def update_artist(artist_id: int, name: str, description: str):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE artists SET name = ?, description = ? WHERE id = ?",
-        (name, description, artist_id)
-    )
-    rows_affected = cursor.rowcount
-    conn.commit()
-    conn.close()
-    return rows_affected > 0 # Retorna True si se actualizó una fila
+    try:
+        sql = "UPDATE artists SET name = %s, description = %s WHERE id = %s"
+        val = (name, description, artist_id)
+        cursor.execute(sql, val)
+        conn.commit()
+        rows_affected = cursor.rowcount
+        return rows_affected > 0
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+        return False
+    finally:
+        conn.close()
 
 # ===============================================
-# DELETE (Eliminación de Artistas)
+# DELETE
 # ===============================================
 
 def delete_artist(artist_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
-    rows_affected = cursor.rowcount
-    conn.commit()
-    conn.close()
-    return rows_affected > 0 # Retorna True si se eliminó una fila
+    try:
+        sql = "DELETE FROM artists WHERE id = %s"
+        val = (artist_id,)
+        cursor.execute(sql, val)
+        conn.commit()
+        rows_affected = cursor.rowcount
+        return rows_affected > 0
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+        return False
+    finally:
+        conn.close()

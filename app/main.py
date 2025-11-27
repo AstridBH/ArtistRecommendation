@@ -43,7 +43,7 @@ class Artist(ArtistBase):
         from_attributes = True 
         
 # ===============================================
-# 3. MODELOS PYDANTIC PARA PROYECTO (EXISTENTES)
+# 3. MODELOS PYDANTIC PARA PROYECTO
 # ===============================================
 
 class ModalidadEnum(str, Enum):
@@ -53,16 +53,21 @@ class ModalidadEnum(str, Enum):
 
 class ContratoEnum(str, Enum):
     TIEMPO_COMPLETO = "TIEMPO_COMPLETO"
-    PARCIAL = "PARCIAL"
+    MEDIO_TIEMPO = "MEDIO_TIEMPO"
     FREELANCE = "FREELANCE"
-    POR_PROYECTO = "POR_PROYECTO"
+    TEMPORAL = "TEMPORAL"
+    PRACTICAS = "PRACTICAS"
+    CONTRATO = "CONTRATO"
+    VOLUNTARIADO = "VOLUNTARIADO"
 
 class EspecialidadEnum(str, Enum):
     ILUSTRACION_DIGITAL = "ILUSTRACION_DIGITAL"
-    MODELADO_3D = "MODELADO_3D"
-    PIXEL_ART = "PIXEL_ART"
+    ILUSTRACION_TRADICIONAL = "ILUSTRACION_TRADICIONAL"
+    COMIC_MANGA = "COMIC_MANGA"
     CONCEPT_ART = "CONCEPT_ART"
     ANIMACION = "ANIMACION"
+    ARTE_3D = "ARTE_3D"
+    ARTE_VECTORIAL = "ARTE_VECTORIAL"
 
 class ProjectInput(BaseModel):
     titulo: str
@@ -138,7 +143,7 @@ def delete_artist_by_id(artist_id: int):
     return 
 
 # ===============================================
-# 5. ENDPOINT DE RECOMENDACIÓN (EXISTENTE)
+# 5. ENDPOINT DE RECOMENDACIÓN
 # ===============================================
 
 @app.post("/recommend", tags=["Recommendations"])

@@ -6,3 +6,5 @@ pydantic
 torch 
 Pillow 
 requests
+mysql-connector-python
+python-dotenv
