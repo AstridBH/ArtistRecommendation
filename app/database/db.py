@@ -102,3 +102,50 @@ def delete_artist(artist_id: int):
         return False
     finally:
         conn.close()
+
+# ===============================================
+# Proyectos
+# ===============================================
+
+def initialize_projects_table():
+    """Crea la tabla de proyectos si no existe."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Definición de la tabla projects
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                titulo VARCHAR(255) NOT NULL,
+                descripcion TEXT NOT NULL,
+                modalidadProyecto VARCHAR(50) NOT NULL,
+                contratoProyecto VARCHAR(50) NOT NULL,
+                especialidadProyecto VARCHAR(50) NOT NULL,
+                requisitos TEXT NOT NULL,
+                image_url VARCHAR(255) 
+            )
+        """)
+        conn.commit()
+    except mysql.connector.Error as err:
+        print(f"Error al inicializar la tabla projects: {err}")
+    finally:
+        conn.close()
+
+def get_all_projects():
+    """Recupera todos los proyectos de la base de datos como diccionarios."""
+    conn = get_db_connection()
+    # Usamos dictionary=True para obtener un diccionario en lugar de una tupla
+    cursor = conn.cursor(dictionary=True) 
+    cursor.execute("SELECT * FROM projects")
+    projects = cursor.fetchall()
+    conn.close()
+    return projects
+
+def get_project_by_id(project_id: int):
+    """Recupera un proyecto por su ID."""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM projects WHERE id = %s", (project_id,))
+    project = cursor.fetchone()
+    conn.close()
+    return project

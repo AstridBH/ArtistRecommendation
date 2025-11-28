@@ -5,7 +5,8 @@ from enum import Enum
 
 # Importar todas las funciones CRUD del módulo db
 from app.database.db import (
-    get_artists, get_artist_by_id, create_artist, update_artist, delete_artist
+    get_artists, get_artist_by_id, create_artist, update_artist, delete_artist, 
+    get_all_projects
 )
 from app.recommender.model import ArtistRecommender
 
@@ -79,6 +80,19 @@ class ProjectInput(BaseModel):
     top_k: int = 3
     image_url: Optional[HttpUrl] = None
 
+# Helper para construir la query semántica (reutilizable)
+def build_full_semantic_query(project: dict) -> str:
+    """Construye la Súper Query semántica a partir de un objeto proyecto (DB dict o Pydantic)."""
+    # Nota: Los campos de la DB deben coincidir con las keys del diccionario.
+    return (
+        f"Proyecto titulado: {project['titulo']}. "
+        f"Buscamos un especialista en {project['especialidadProyecto'].replace('_', ' ')}. "
+        f"Descripción del trabajo: {project['descripcion']}. "
+        f"Requisitos técnicos y habilidades: {project['requisitos']}. "
+        f"Modalidad de trabajo: {project['modalidadProyecto']}. "
+        f"Tipo de contrato: {project['contratoProyecto'].replace('_', ' ')}."
+    )
+
 # ===============================================
 # 4. ENDPOINTS CRUD PARA ARTISTAS
 # ===============================================
@@ -146,21 +160,14 @@ def delete_artist_by_id(artist_id: int):
 # 5. ENDPOINT DE RECOMENDACIÓN
 # ===============================================
 
-@app.post("/recommend", tags=["Recommendations"])
-def recommend_artists(project: ProjectInput):
-    """Genera una recomendación multimodal de artistas basada en la descripción y la imagen del proyecto."""
-    
-    # Construcción de la "Súper Query" semántica
-    full_semantic_query = (
-        f"Proyecto titulado: {project.titulo}. "
-        f"Buscamos un especialista en {project.especialidadProyecto.value.replace('_', ' ')}. "
-        f"Descripción del trabajo: {project.descripcion}. "
-        f"Requisitos técnicos y habilidades: {project.requisitos}. "
-        f"Modalidad de trabajo: {project.modalidadProyecto.value}. "
-        f"Tipo de contrato: {project.contratoProyecto.value.replace('_', ' ')}."
-    )
 
-    # El recomendador global 'recommender' se usa aquí
+@app.post("/recommend")
+def recommend_artists(project: ProjectInput):
+    """Genera una recomendación para un proyecto enviado directamente en el payload."""
+    
+    # El objeto Pydantic ProjectInput se convierte a dict para usar la función helper
+    full_semantic_query = build_full_semantic_query(project.dict())
+
     results = recommender.recommend(
         project_description=full_semantic_query,
         top_k=project.top_k, 
@@ -168,3 +175,36 @@ def recommend_artists(project: ProjectInput):
     )
     
     return {"recommended_artists": results}
+
+
+@app.get("/recommendations/process_all", tags=["Recommendations"])
+def process_all_projects():
+    """
+    Recupera todos los proyectos de la DB, genera recomendaciones para cada uno
+    y devuelve una lista estructurada de resultados.
+    """
+    projects = get_all_projects()
+    if not projects:
+        raise HTTPException(status_code=404, detail="No hay proyectos registrados en la base de datos.")
+
+    all_recommendations = []
+    
+    for project in projects:
+        # 1. Crear la Query Semántica a partir del dict de la DB
+        full_semantic_query = build_full_semantic_query(project)
+        
+        # 2. Generar Recomendaciones (top_k=3 por defecto)
+        results = recommender.recommend(
+            project_description=full_semantic_query,
+            top_k=3, 
+            image_url=project.get('image_url') 
+        )
+
+        # 3. Estructurar el resultado por proyecto
+        all_recommendations.append({
+            "project_id": project['id'],
+            "project_titulo": project['titulo'],
+            "recommended_artists": results
+        })
+
+    return {"batch_results": all_recommendations}
