@@ -1,10 +1,11 @@
 fastapi
-uvicorn
+uvicorn[standard]
 sentence-transformers
 numpy
 pydantic
+pydantic-settings
 torch 
 Pillow 
 requests
-mysql-connector-python
+urllib3
 python-dotenv

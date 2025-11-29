@@ -1,27 +1,136 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, HttpUrl
-from typing import Optional
+from typing import Optional, List
 from enum import Enum
+import logging
+import time
 
-# Importar todas las funciones CRUD del módulo db
-from app.database.db import (
-    get_artists, get_artist_by_id, create_artist, update_artist, delete_artist, 
-    get_all_projects
-)
+# Importar clientes de microservicios
+from app.clients.project_client import project_service_client
+from app.clients.portafolio_client import portafolio_service_client
 from app.recommender.model import ArtistRecommender
+from app.cache import cache, CACHE_KEY_ALL_PROJECTS, CACHE_KEY_ALL_ARTISTS
+from app.config import settings
+from app.error_handlers import (
+    validation_exception_handler,
+    http_exception_handler,
+    handle_microservice_error,
+    log_request_info,
+    log_response_info
+)
 
-app = FastAPI(title="ArtCollab Artists Recommender w/ SQLite")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="ArtCollab Artists Recommender - Microservices Integration",
+    description="Sistema de recomendación de artistas integrado con microservicios de Proyectos y Portafolios",
+    version="2.0.0"
+)
+
+# Registrar manejadores de errores
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, http_exception_handler)
+
+
+# Middleware para logging de requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Middleware para registrar todas las peticiones HTTP."""
+    start_time = time.time()
+    
+    # Log de la petición entrante
+    log_request_info(
+        endpoint=request.url.path,
+        method=request.method,
+        client=request.client.host if request.client else "unknown"
+    )
+    
+    # Procesar la petición
+    response = await call_next(request)
+    
+    # Log de la respuesta
+    duration_ms = (time.time() - start_time) * 1000
+    log_response_info(
+        endpoint=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms
+    )
+    
+    return response
 
 # ===============================================
 # 1. GESTIÓN DEL MODELO DE RECOMENDACIÓN
 # ===============================================
 
+def get_artists_from_service() -> List[dict]:
+    """
+    Obtiene artistas desde el PortafolioService con caché.
+    
+    Returns:
+        Lista de artistas en formato interno
+    """
+    # Intentar obtener desde caché
+    cached_artists = cache.get(CACHE_KEY_ALL_ARTISTS)
+    if cached_artists is not None:
+        logger.info(f"Using cached artists data ({len(cached_artists)} artists)")
+        return cached_artists
+    
+    try:
+        # Obtener desde PortafolioService
+        logger.info("Fetching artists from PortafolioService")
+        portafolios = portafolio_service_client.get_all_ilustradores()
+        
+        # Transformar a formato interno
+        artists = []
+        transformation_errors = 0
+        
+        for portafolio in portafolios:
+            try:
+                artist = portafolio_service_client.transform_ilustrador_to_artist_format(portafolio)
+                artists.append(artist)
+            except Exception as e:
+                transformation_errors += 1
+                logger.error(f"Error transforming portafolio {portafolio.get('id', 'unknown')}: {e}")
+                continue
+        
+        logger.info(f"Successfully fetched and transformed {len(artists)} artists "
+                   f"({transformation_errors} transformation errors)")
+        
+        # Guardar en caché
+        cache.set(CACHE_KEY_ALL_ARTISTS, artists)
+        
+        return artists
+        
+    except Exception as e:
+        error_info = handle_microservice_error("PortafolioService", e)
+        logger.error(f"Error fetching artists: {error_info}")
+        
+        # Si hay datos en caché aunque estén expirados, usarlos como fallback
+        cached_artists = cache.get(CACHE_KEY_ALL_ARTISTS)
+        if cached_artists:
+            logger.warning("Using expired cache as fallback")
+            return cached_artists
+        
+        raise HTTPException(
+            status_code=503,
+            detail=error_info.get("user_message", "PortafolioService unavailable")
+        )
+
+
 def initialize_recommender():
     """Recarga los datos y reinicializa el modelo de recomendación."""
-    artists = get_artists()
-    # Asume que ArtistRecommender está adaptado para solo usar embeddings de texto 
-    # de los artistas, como se definió en los pasos anteriores.
-    return ArtistRecommender(artists)
+    try:
+        artists = get_artists_from_service()
+        if not artists:
+            logger.warning("No artists available, initializing with empty list")
+            artists = []
+        return ArtistRecommender(artists)
+    except Exception as e:
+        logger.error(f"Error initializing recommender: {e}")
+        # Retornar un recomendador con lista vacía como fallback
+        return ArtistRecommender([])
+
 
 recommender = initialize_recommender()
 
@@ -94,117 +203,197 @@ def build_full_semantic_query(project: dict) -> str:
     )
 
 # ===============================================
-# 4. ENDPOINTS CRUD PARA ARTISTAS
+# 4. ENDPOINTS DE GESTIÓN DE CACHÉ Y SISTEMA
 # ===============================================
 
-@app.get("/artists", response_model=list[Artist], tags=["Artists CRUD"])
+@app.get("/artists", response_model=list[Artist], tags=["Artists"])
 def read_artists():
-    """Obtiene la lista completa de artistas."""
-    return get_artists()
+    """Obtiene la lista completa de artistas desde PortafolioService."""
+    try:
+        artists = get_artists_from_service()
+        return artists
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in read_artists endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching artists")
 
-@app.get("/artists/{artist_id}", response_model=Artist, tags=["Artists CRUD"])
-def read_artist(artist_id: int):
-    """Obtiene un artista por su ID."""
-    artist = get_artist_by_id(artist_id)
-    if artist is None:
-        raise HTTPException(status_code=404, detail=f"Artista con ID {artist_id} no encontrado")
-    return artist
 
-@app.post("/artists", response_model=Artist, status_code=status.HTTP_201_CREATED, tags=["Artists CRUD"])
-def create_new_artist(artist: ArtistCreate):
-    """Crea un nuevo artista y actualiza el modelo de recomendación."""
-    new_id = create_artist(artist.name, artist.description)
-    
-    if new_id is None:
-        raise HTTPException(status_code=400, detail="No se pudo crear el artista (posible error de base de datos).")
-    
-    # CRÍTICO: Recargar el recomendador global para incluir el nuevo artista
-    global recommender
-    recommender = initialize_recommender()
-    
-    return get_artist_by_id(new_id)
-
-@app.put("/artists/{artist_id}", response_model=Artist, tags=["Artists CRUD"])
-def update_existing_artist(artist_id: int, artist: ArtistCreate):
-    """Actualiza un artista existente y el modelo de recomendación."""
-    if not get_artist_by_id(artist_id):
-        raise HTTPException(status_code=404, detail=f"Artista con ID {artist_id} no encontrado")
+@app.post("/cache/invalidate", tags=["System"])
+def invalidate_cache():
+    """Invalida todo el caché y recarga el modelo de recomendación."""
+    try:
+        cache.invalidate_all()
         
-    success = update_artist(artist_id, artist.name, artist.description)
-    
-    if not success:
-        raise HTTPException(status_code=500, detail="Error al actualizar el artista.")
-    
-    # CRÍTICO: Recargar el recomendador global
-    global recommender
-    recommender = initialize_recommender()
-    
-    return get_artist_by_id(artist_id)
-
-@app.delete("/artists/{artist_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Artists CRUD"])
-def delete_artist_by_id(artist_id: int):
-    """Elimina un artista por su ID y actualiza el modelo de recomendación."""
-    success = delete_artist(artist_id)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail=f"Artista con ID {artist_id} no encontrado")
+        # Recargar el recomendador global
+        global recommender
+        recommender = initialize_recommender()
         
-    # CRÍTICO: Recargar el recomendador global
-    global recommender
-    recommender = initialize_recommender()
+        return {
+            "message": "Cache invalidated and recommender reloaded successfully",
+            "cache_stats": cache.get_stats()
+        }
+    except Exception as e:
+        logger.error(f"Error invalidating cache: {e}")
+        raise HTTPException(status_code=500, detail="Error invalidating cache")
+
+
+@app.get("/cache/stats", tags=["System"])
+def get_cache_stats():
+    """Obtiene estadísticas del caché."""
+    return cache.get_stats()
+
+
+@app.get("/health", tags=["System"])
+def health_check():
+    """Verifica el estado del servicio y la conectividad con microservicios."""
+    health_status = {
+        "status": "healthy",
+        "recommender_artists_count": len(recommender.artists),
+        "cache_stats": cache.get_stats(),
+        "microservices": {}
+    }
     
-    # El status 204 (No Content) por convención no retorna cuerpo de respuesta
-    return 
+    # Verificar ProjectService
+    try:
+        project_service_client.get_all_projects()
+        health_status["microservices"]["project_service"] = "connected"
+    except Exception as e:
+        health_status["microservices"]["project_service"] = f"error: {str(e)}"
+        health_status["status"] = "degraded"
+    
+    # Verificar PortafolioService
+    try:
+        portafolio_service_client.get_all_ilustradores()
+        health_status["microservices"]["portafolio_service"] = "connected"
+    except Exception as e:
+        health_status["microservices"]["portafolio_service"] = f"error: {str(e)}"
+        health_status["status"] = "degraded"
+    
+    return health_status 
 
 # ===============================================
 # 5. ENDPOINT DE RECOMENDACIÓN
 # ===============================================
 
 
-@app.post("/recommend")
+@app.post("/recommend", tags=["Recommendations"])
 def recommend_artists(project: ProjectInput):
-    """Genera una recomendación para un proyecto enviado directamente en el payload."""
-    
-    # El objeto Pydantic ProjectInput se convierte a dict para usar la función helper
-    full_semantic_query = build_full_semantic_query(project.dict())
-
-    results = recommender.recommend(
-        project_description=full_semantic_query,
-        top_k=project.top_k, 
-        image_url=project.image_url
-    )
-    
-    return {"recommended_artists": results}
+    """
+    Genera una recomendación para un proyecto enviado directamente en el payload.
+    Mantiene compatibilidad con el formato de request existente.
+    """
+    try:
+        logger.info(f"Recommendation request for project: {project.titulo}")
+        
+        # Convertir ProjectInput a dict y construir query semántica
+        project_dict = project.dict()
+        full_semantic_query = build_full_semantic_query(project_dict)
+        
+        # Generar recomendaciones
+        results = recommender.recommend(
+            project_description=full_semantic_query,
+            top_k=project.top_k, 
+            image_url=project.image_url
+        )
+        
+        logger.info(f"Generated {len(results)} recommendations for project: {project.titulo}")
+        
+        return {"recommended_artists": results}
+        
+    except Exception as e:
+        logger.error(f"Error in recommend endpoint: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error generating recommendations"
+        )
 
 
 @app.get("/recommendations/process_all", tags=["Recommendations"])
 def process_all_projects():
     """
-    Recupera todos los proyectos de la DB, genera recomendaciones para cada uno
+    Recupera todos los proyectos desde ProjectService, genera recomendaciones para cada uno
     y devuelve una lista estructurada de resultados.
+    Mantiene compatibilidad con el formato de respuesta existente.
     """
-    projects = get_all_projects()
-    if not projects:
-        raise HTTPException(status_code=404, detail="No hay proyectos registrados en la base de datos.")
-
-    all_recommendations = []
-    
-    for project in projects:
-        # 1. Crear la Query Semántica a partir del dict de la DB
-        full_semantic_query = build_full_semantic_query(project)
+    try:
+        # Intentar obtener desde caché
+        cached_projects = cache.get(CACHE_KEY_ALL_PROJECTS)
         
-        # 2. Generar Recomendaciones (top_k=3 por defecto)
-        results = recommender.recommend(
-            project_description=full_semantic_query,
-            top_k=3, 
-            image_url=project.get('image_url') 
+        if cached_projects is None:
+            logger.info("Fetching all projects from ProjectService")
+            # Obtener desde ProjectService
+            raw_projects = project_service_client.get_all_projects()
+            
+            # Transformar a formato interno
+            projects = []
+            for raw_project in raw_projects:
+                try:
+                    transformed = project_service_client.transform_project_to_internal_format(raw_project)
+                    projects.append(transformed)
+                except Exception as e:
+                    logger.error(f"Error transforming project: {e}")
+                    continue
+            
+            # Guardar en caché
+            cache.set(CACHE_KEY_ALL_PROJECTS, projects)
+        else:
+            logger.info(f"Using cached projects data ({len(cached_projects)} projects)")
+            projects = cached_projects
+        
+        if not projects:
+            raise HTTPException(
+                status_code=404,
+                detail="No hay proyectos disponibles en ProjectService"
+            )
+        
+        logger.info(f"Processing recommendations for {len(projects)} projects")
+        
+        all_recommendations = []
+        errors = []
+        
+        for project in projects:
+            try:
+                # 1. Crear la Query Semántica
+                full_semantic_query = project_service_client.build_semantic_query(project)
+                
+                # 2. Generar Recomendaciones (top_k=3 por defecto)
+                results = recommender.recommend(
+                    project_description=full_semantic_query,
+                    top_k=3, 
+                    image_url=project.get('image_url') 
+                )
+
+                # 3. Estructurar el resultado por proyecto
+                all_recommendations.append({
+                    "project_id": project['id'],
+                    "project_titulo": project['titulo'],
+                    "recommended_artists": results
+                })
+                
+            except Exception as e:
+                logger.error(f"Error processing project {project.get('id')}: {e}")
+                errors.append({
+                    "project_id": project.get('id'),
+                    "error": str(e)
+                })
+                continue
+        
+        response = {"batch_results": all_recommendations}
+        
+        if errors:
+            response["errors"] = errors
+            response["warning"] = f"Processed {len(all_recommendations)} projects with {len(errors)} errors"
+        
+        logger.info(f"Completed batch processing: {len(all_recommendations)} successful, {len(errors)} errors")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in process_all_projects endpoint: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error processing projects"
         )
-
-        # 3. Estructurar el resultado por proyecto
-        all_recommendations.append({
-            "project_id": project['id'],
-            "project_titulo": project['titulo'],
-            "recommended_artists": results
-        })
-
-    return {"batch_results": all_recommendations}
