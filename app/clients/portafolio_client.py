@@ -85,12 +85,15 @@ class PortafolioServiceClient:
             # Extraer URLs de imágenes de ilustraciones
             image_urls = self._extract_image_urls(portafolio)
             
+            logger.debug(f"Extracted {len(image_urls)} image URLs for artist {ilustrador_id}")
+            
             transformed = {
                 "id": ilustrador_id,
                 "name": nombre,
                 "description": description,
                 "image_urls": image_urls,
-                "image_path": image_urls[0] if image_urls else None  # Primera imagen como principal
+                "image_path": image_urls[0] if image_urls else None,  # Primera imagen como principal
+                "visual_embeddings": []  # Will be populated during initialization
             }
             
             return transformed

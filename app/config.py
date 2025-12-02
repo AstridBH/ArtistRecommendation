@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # JWT Token (opcional, para autenticación)
     jwt_token: Optional[str] = None
     
+    # Configuración de descarga de imágenes
+    image_download_timeout: int = 10
+    image_download_max_retries: int = 3
+    image_batch_size: int = 10
+    
+    # Configuración de embeddings visuales
+    visual_embedding_cache_size_mb: int = 500
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

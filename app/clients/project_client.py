@@ -26,7 +26,7 @@ class ProjectServiceClient:
             requests.exceptions.RequestException: Si falla la comunicación
         """
         try:
-            url = f"{self.base_url}/api/proyectos"
+            url = f"{self.base_url}/api/v1/proyectos"
             logger.info(f"Fetching all projects from {url}")
             
             response = http_client.get(url)
@@ -52,7 +52,7 @@ class ProjectServiceClient:
             Diccionario con datos del proyecto o None si no existe
         """
         try:
-            url = f"{self.base_url}/api/proyectos/{project_id}"
+            url = f"{self.base_url}/api/v1/proyectos/{project_id}"
             logger.info(f"Fetching project {project_id} from {url}")
             
             response = http_client.get(url)

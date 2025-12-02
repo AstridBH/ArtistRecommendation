@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, List
 from enum import Enum
@@ -26,6 +27,20 @@ app = FastAPI(
     title="ArtCollab Artists Recommender - Microservices Integration",
     description="Sistema de recomendación de artistas integrado con microservicios de Proyectos y Portafolios",
     version="2.0.0"
+)
+
+# Configurar CORS para permitir peticiones desde Angular
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:4200",
+        "http://127.0.0.1:4200",
+        "http://localhost:4201",
+        "http://127.0.0.1:4201"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Registrar manejadores de errores
@@ -244,6 +259,20 @@ def get_cache_stats():
     return cache.get_stats()
 
 
+@app.get("/statistics", tags=["System"])
+def get_statistics():
+    """Obtiene estadísticas del sistema de recomendación."""
+    try:
+        stats = recommender.get_statistics()
+        return {
+            "status": "success",
+            "statistics": stats
+        }
+    except Exception as e:
+        logger.error(f"Error getting statistics: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving statistics")
+
+
 @app.get("/health", tags=["System"])
 def health_check():
     """Verifica el estado del servicio y la conectividad con microservicios."""
@@ -253,6 +282,18 @@ def health_check():
         "cache_stats": cache.get_stats(),
         "microservices": {}
     }
+    
+    # Add visual embeddings statistics
+    try:
+        visual_stats = recommender.get_statistics()
+        health_status["visual_embeddings"] = {
+            "total_cached": visual_stats["total_visual_embeddings_cached"],
+            "artists_with_embeddings": visual_stats["artists_with_visual_embeddings"],
+            "memory_usage_mb": visual_stats["estimated_memory_usage_mb"]
+        }
+    except Exception as e:
+        logger.error(f"Error getting visual embeddings stats: {e}")
+        health_status["visual_embeddings"] = "error"
     
     # Verificar ProjectService
     try:
