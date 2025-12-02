@@ -1,13 +1,16 @@
 # ArtCollab - Artist Recommender Service
 
-Sistema de recomendación de artistas integrado con microservicios usando FastAPI + CLIP AI Model.
+Sistema de recomendación de artistas basado en análisis visual usando FastAPI + CLIP AI Model.
 
 ## 🚀 Características
 
+- ✅ **Análisis Visual de Portafolios**: Compara proyectos con imágenes reales de ilustraciones
 - ✅ **Integración con Microservicios**: Obtiene datos reales de ProjectService y PortafolioService
-- ✅ **Modelo CLIP**: Análisis semántico avanzado de texto e imágenes
-- ✅ **Sistema de Caché**: Reduce latencia y carga en microservicios
-- ✅ **Análisis Multimodal**: Soporte para referencias visuales
+- ✅ **Modelo CLIP Multimodal**: Análisis semántico de texto e imágenes en espacio compartido
+- ✅ **Caché Persistente de Embeddings**: Almacenamiento en disco para evitar reprocesamiento
+- ✅ **Agregación Inteligente de Scores**: Múltiples estrategias para artistas con varios trabajos
+- ✅ **Procesamiento Paralelo**: Descarga y procesamiento eficiente de imágenes
+- ✅ **Métricas y Monitoreo**: Tracking de calidad, performance y tasas de éxito
 - ✅ **Logging Comprehensivo**: Monitoreo detallado de todas las operaciones
 - ✅ **Manejo de Errores Robusto**: Recuperación automática y fallbacks
 
@@ -37,13 +40,35 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Edita `.env` con las URLs de tus microservicios:
+Edita `.env` con las URLs de tus microservicios y configuración de procesamiento de imágenes:
 ```env
+# Microservices
 PROJECT_SERVICE_URL=http://localhost:8085
 PORTAFOLIO_SERVICE_URL=http://localhost:8084
+
+# Image Processing
+MAX_IMAGE_SIZE=512
+IMAGE_BATCH_SIZE=32
+IMAGE_DOWNLOAD_TIMEOUT=10
+IMAGE_DOWNLOAD_WORKERS=10
+
+# Caching
+EMBEDDING_CACHE_DIR=./cache/embeddings
 CACHE_TTL_SECONDS=300
+
+# Recommendation
+AGGREGATION_STRATEGY=max
+TOP_K_ILLUSTRATIONS=3
+
+# Model
+CLIP_MODEL_NAME=clip-ViT-B-32
+
+# Logging
 LOG_LEVEL=INFO
+LOG_IMAGE_DETAILS=false
 ```
+
+Para más detalles sobre configuración, consulta [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md).
 
 ## 🚀 Inicio Rápido
 
@@ -85,9 +110,11 @@ Abre http://localhost:8000/docs en tu navegador
 
 ## 📚 Documentación
 
+- **[Guía de Matching Visual](VISUAL_MATCHING_GUIDE.md)** - Cómo funciona el análisis visual
 - **[Inicio Rápido](QUICKSTART.md)** - Guía de inicio en 5 minutos
 - **[Guía de Integración](INTEGRATION_GUIDE.md)** - Documentación completa
 - **[Ejemplos de API](API_EXAMPLES.md)** - Ejemplos de uso con código
+- **[Guía de Configuración](CONFIGURATION_GUIDE.md)** - Referencia de configuración
 - **[Resumen de Implementación](IMPLEMENTATION_SUMMARY.md)** - Detalles técnicos
 - **[Lista de Verificación](MIGRATION_CHECKLIST.md)** - Checklist de migración
 
@@ -102,6 +129,29 @@ Abre http://localhost:8000/docs en tu navegador
 | GET | `/cache/stats` | Estadísticas del caché |
 | POST | `/cache/invalidate` | Invalidar caché |
 | GET | `/docs` | Documentación Swagger UI |
+
+## 🎨 Sistema de Matching Visual
+
+El servicio utiliza **análisis visual de portafolios** para generar recomendaciones precisas:
+
+### Cómo Funciona
+
+1. **Procesamiento de Portafolios**: Al iniciar, el sistema descarga y procesa todas las ilustraciones de cada artista
+2. **Generación de Embeddings**: Usa el modelo CLIP para crear representaciones vectoriales de cada imagen
+3. **Caché Persistente**: Almacena embeddings en disco para evitar reprocesamiento
+4. **Comparación Multimodal**: Compara descripciones textuales de proyectos con imágenes de portafolios
+5. **Agregación Inteligente**: Combina scores de múltiples ilustraciones usando estrategias configurables
+6. **Ranking Visual**: Ordena artistas por similitud visual real, no por texto
+
+### Ventajas del Análisis Visual
+
+- ✅ **Precisión Superior**: Compara el trabajo real del artista, no solo descripciones
+- ✅ **Matching Multimodal**: Entiende la relación entre texto e imágenes
+- ✅ **Estilo Visual**: Captura estilos artísticos que son difíciles de describir con palabras
+- ✅ **Portfolio Completo**: Considera todas las ilustraciones del artista
+- ✅ **Sin Sesgo Textual**: No depende de qué tan bien el artista se describe a sí mismo
+
+Para más detalles, consulta la [Guía de Matching Visual](VISUAL_MATCHING_GUIDE.md).
 
 ## 💡 Ejemplo de Uso
 
@@ -148,44 +198,85 @@ curl -X POST http://localhost:8000/recommend \
 ## 🏗️ Arquitectura
 
 ```
-┌─────────────────────────────────────────┐
-│   RecommenderService (FastAPI)          │
-│   http://localhost:8000                 │
-│                                         │
-│   • Modelo CLIP (ViT-B-32)             │
-│   • Caché en memoria (TTL: 5min)       │
-│   • Logging comprehensivo              │
-│   • Manejo de errores robusto          │
-└─────────────────────────────────────────┘
-           │                    │
-           │                    │
-           ▼                    ▼
-┌──────────────────┐  ┌──────────────────┐
-│ ProjectService   │  │ PortafolioService│
-│ :8085            │  │ :8084            │
-│ (Java/Spring)    │  │ (Java/Spring)    │
-└──────────────────┘  └──────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     RecommenderService (FastAPI)                 │
+│                     http://localhost:8000                        │
+│                                                                   │
+│  ┌────────────────┐         ┌──────────────────┐                │
+│  │  API Endpoints │────────▶│ ArtistRecommender│                │
+│  │  /recommend    │         │                  │                │
+│  │  /process_all  │         │  • CLIP Model    │                │
+│  │  /metrics      │         │  • Image Proc    │                │
+│  └────────────────┘         │  • Score Agg     │                │
+│                              └──────────────────┘                │
+│                                       │                           │
+│                                       ▼                           │
+│                              ┌──────────────────┐                │
+│                              │ Embedding Cache  │                │
+│                              │  (Disk + Memory) │                │
+│                              └──────────────────┘                │
+└─────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+                    ┌──────────────────────────────────┐
+                    │   PortafolioService (Java)       │
+                    │   - Artist portfolios            │
+                    │   - Illustration image URLs      │
+                    └──────────────────────────────────┘
+                                       │
+                                       ▼
+                    ┌──────────────────────────────────┐
+                    │   ProjectService (Java)          │
+                    │   - Project descriptions         │
+                    │   - Project requirements         │
+                    └──────────────────────────────────┘
 ```
+
+### Flujo de Recomendación Visual
+
+1. **Inicialización**: Descarga y procesa todas las ilustraciones de artistas
+2. **Generación de Embeddings**: Crea embeddings visuales usando CLIP
+3. **Caché Persistente**: Almacena embeddings en disco para reutilización
+4. **Comparación Multimodal**: Compara descripción textual del proyecto con embeddings visuales
+5. **Agregación de Scores**: Combina scores de múltiples ilustraciones por artista
+6. **Ranking**: Ordena artistas por similitud visual y retorna top-k
 
 ## 🔍 Estructura del Proyecto
 
 ```
 ArtistRecommendation/
 ├── app/
-│   ├── clients/              # Clientes de microservicios
-│   │   ├── project_client.py
-│   │   └── portafolio_client.py
-│   ├── recommender/          # Modelo de IA
-│   │   └── model.py
-│   ├── cache.py             # Sistema de caché
-│   ├── config.py            # Configuración
-│   ├── error_handlers.py    # Manejo de errores
-│   ├── http_client.py       # Cliente HTTP
-│   └── main.py             # Aplicación FastAPI
-├── .env.example            # Plantilla de configuración
-├── requirements.txt        # Dependencias
-├── test_integration.py     # Script de prueba
-└── docs/                   # Documentación
+│   ├── clients/                      # Clientes de microservicios
+│   │   ├── project_client.py         # Cliente ProjectService
+│   │   └── portafolio_client.py      # Cliente PortafolioService
+│   ├── recommender/                  # Motor de recomendación
+│   │   └── model.py                  # ArtistRecommender con análisis visual
+│   ├── cache.py                      # Sistema de caché en memoria
+│   ├── embedding_cache.py            # Caché persistente de embeddings
+│   ├── image_downloader.py           # Descarga paralela de imágenes
+│   ├── image_embedding_generator.py  # Generación de embeddings visuales
+│   ├── score_aggregator.py           # Estrategias de agregación de scores
+│   ├── metrics.py                    # Sistema de métricas y monitoreo
+│   ├── config.py                     # Configuración centralizada
+│   ├── error_handlers.py             # Manejo de errores
+│   ├── http_client.py                # Cliente HTTP reutilizable
+│   └── main.py                       # Aplicación FastAPI
+├── cache/
+│   └── embeddings/                   # Caché persistente de embeddings
+│       └── metadata.json             # Metadatos de caché
+├── tests/                            # Suite de pruebas
+│   ├── test_artist_recommender.py
+│   ├── test_embedding_cache.py
+│   ├── test_image_downloader.py
+│   ├── test_image_embedding_generator.py
+│   ├── test_score_aggregator.py
+│   ├── test_metrics.py
+│   └── test_integration_comprehensive.py
+├── .env.example                      # Plantilla de configuración
+├── requirements.txt                  # Dependencias Python
+├── CONFIGURATION_GUIDE.md            # Guía de configuración
+├── API_EXAMPLES.md                   # Ejemplos de uso de API
+└── README.md                         # Este archivo
 ```
 
 ## 🧪 Testing

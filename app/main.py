@@ -19,6 +19,7 @@ from app.error_handlers import (
     log_request_info,
     log_response_info
 )
+from app.metrics import metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +271,56 @@ def health_check():
         health_status["microservices"]["portafolio_service"] = f"error: {str(e)}"
         health_status["status"] = "degraded"
     
-    return health_status 
+    return health_status
+
+
+@app.get("/metrics", tags=["System"])
+def get_metrics():
+    """
+    Expone métricas del sistema de recomendaciones.
+    
+    Incluye:
+    - Promedio de scores de similitud
+    - Tasa de éxito de procesamiento de imágenes
+    - Tasa de aciertos de caché
+    - Tiempos de respuesta y throughput
+    """
+    try:
+        metrics = metrics_collector.get_metrics()
+        return metrics
+    except Exception as e:
+        logger.error(f"Error getting metrics: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving metrics")
+
+
+@app.get("/metrics/summary", tags=["System"])
+def get_metrics_summary():
+    """
+    Obtiene estadísticas detalladas incluyendo percentiles y distribuciones.
+    """
+    try:
+        summary = metrics_collector.get_summary_stats()
+        return summary
+    except Exception as e:
+        logger.error(f"Error getting metrics summary: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving metrics summary")
+
+
+@app.post("/metrics/reset", tags=["System"])
+def reset_metrics():
+    """
+    Reinicia todos los contadores de métricas.
+    Retorna las métricas finales antes del reinicio.
+    """
+    try:
+        final_metrics = metrics_collector.reset()
+        return {
+            "message": "Metrics reset successfully",
+            "final_metrics": final_metrics
+        }
+    except Exception as e:
+        logger.error(f"Error resetting metrics: {e}")
+        raise HTTPException(status_code=500, detail="Error resetting metrics") 
 
 # ===============================================
 # 5. ENDPOINT DE RECOMENDACIÓN
@@ -293,8 +343,7 @@ def recommend_artists(project: ProjectInput):
         # Generar recomendaciones
         results = recommender.recommend(
             project_description=full_semantic_query,
-            top_k=project.top_k, 
-            image_url=project.image_url
+            top_k=project.top_k
         )
         
         logger.info(f"Generated {len(results)} recommendations for project: {project.titulo}")
@@ -360,8 +409,7 @@ def process_all_projects():
                 # 2. Generar Recomendaciones (top_k=3 por defecto)
                 results = recommender.recommend(
                     project_description=full_semantic_query,
-                    top_k=3, 
-                    image_url=project.get('image_url') 
+                    top_k=3
                 )
 
                 # 3. Estructurar el resultado por proyecto

@@ -1,0 +1,5 @@
+{
+  "version": "1.0",
+  "model_name": "clip-ViT-B-32",
+  "embeddings": {}
+}
