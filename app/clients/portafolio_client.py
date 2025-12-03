@@ -26,7 +26,7 @@ class PortafolioServiceClient:
             requests.exceptions.RequestException: Si falla la comunicación
         """
         try:
-            url = f"{self.base_url}/api/portafolios"
+            url = f"{self.base_url}/api/v1/portafolios"
             logger.info(f"Fetching all ilustradores from {url}")
             
             response = http_client.get(url)
@@ -52,7 +52,7 @@ class PortafolioServiceClient:
             Diccionario con datos del ilustrador o None si no existe
         """
         try:
-            url = f"{self.base_url}/api/portafolios/{ilustrador_id}"
+            url = f"{self.base_url}/api/v1/portafolios/ilustrador/{ilustrador_id}"
             logger.info(f"Fetching ilustrador {ilustrador_id} from {url}")
             
             response = http_client.get(url)
@@ -76,8 +76,10 @@ class PortafolioServiceClient:
         """
         try:
             # Extraer información del ilustrador
-            ilustrador_id = portafolio.get("id") or portafolio.get("ilustradorId")
-            nombre = portafolio.get("nombreIlustrador") or portafolio.get("nombre", "Artista Desconocido")
+            # El ID del ilustrador está en ilustradorId, no en id (que es el ID del portafolio)
+            ilustrador_id = portafolio.get("ilustradorId")
+            # El nombre del ilustrador no viene en el portafolio, usar el título del portafolio
+            nombre = portafolio.get("titulo", "Artista Desconocido")
             
             # Construir descripción semántica del artista
             description = self.build_artist_description(portafolio)
@@ -115,16 +117,21 @@ class PortafolioServiceClient:
         image_urls = []
         
         try:
-            ilustraciones = portafolio.get("ilustraciones", [])
+            # El portafolio tiene categorías, y cada categoría tiene ilustraciones
+            categorias = portafolio.get("categorias", [])
             
-            for ilustracion in ilustraciones:
-                # Intentar diferentes nombres de campo para la URL
-                url = (ilustracion.get("imageUrl") or 
-                       ilustracion.get("image_url") or 
-                       ilustracion.get("url"))
+            for categoria in categorias:
+                ilustraciones = categoria.get("ilustraciones", [])
                 
-                if url:
-                    image_urls.append(url)
+                for ilustracion in ilustraciones:
+                    # Intentar diferentes nombres de campo para la URL
+                    url = (ilustracion.get("urlImagen") or 
+                           ilustracion.get("imageUrl") or 
+                           ilustracion.get("image_url") or 
+                           ilustracion.get("url"))
+                    
+                    if url:
+                        image_urls.append(url)
             
             logger.debug(f"Extracted {len(image_urls)} image URLs from portafolio")
             
@@ -147,57 +154,47 @@ class PortafolioServiceClient:
         try:
             description_parts = []
             
-            # Nombre del ilustrador
-            nombre = portafolio.get("nombreIlustrador") or portafolio.get("nombre")
-            if nombre:
-                description_parts.append(f"Ilustrador: {nombre}.")
+            # Título del portafolio (nombre del ilustrador)
+            titulo = portafolio.get("titulo")
+            if titulo:
+                description_parts.append(f"Ilustrador: {titulo}.")
             
             # Descripción general del portafolio
-            descripcion_general = portafolio.get("descripcion") or portafolio.get("descripcionGeneral")
+            descripcion_general = portafolio.get("descripcion")
             if descripcion_general:
                 description_parts.append(f"{descripcion_general}")
             
-            # Especialidades
-            especialidades = portafolio.get("especialidades", [])
-            if especialidades:
-                esp_text = ", ".join(especialidades)
-                description_parts.append(f"Especialidades: {esp_text}.")
-            
-            # Estilos artísticos
-            estilos = portafolio.get("estilos", [])
-            if estilos:
-                estilos_text = ", ".join(estilos)
-                description_parts.append(f"Estilos: {estilos_text}.")
-            
-            # Técnicas
-            tecnicas = portafolio.get("tecnicas", [])
-            if tecnicas:
-                tecnicas_text = ", ".join(tecnicas)
-                description_parts.append(f"Técnicas: {tecnicas_text}.")
-            
-            # Agregar descripciones de ilustraciones individuales
-            ilustraciones = portafolio.get("ilustraciones", [])
-            if ilustraciones:
-                description_parts.append(f"Portafolio con {len(ilustraciones)} ilustraciones.")
-                
-                # Agregar descripciones de las primeras ilustraciones (máximo 5)
-                for i, ilustracion in enumerate(ilustraciones[:5]):
-                    titulo = ilustracion.get("titulo") or ilustracion.get("title")
-                    desc = ilustracion.get("descripcion") or ilustracion.get("description")
-                    
-                    if titulo or desc:
-                        parts = []
-                        if titulo:
-                            parts.append(f"'{titulo}'")
-                        if desc:
-                            parts.append(desc)
-                        description_parts.append(f"Obra {i+1}: {' - '.join(parts)}.")
-            
-            # Categorías del portafolio
+            # Procesar categorías e ilustraciones
             categorias = portafolio.get("categorias", [])
+            total_ilustraciones = 0
+            
             if categorias:
-                cat_text = ", ".join(categorias)
-                description_parts.append(f"Categorías: {cat_text}.")
+                # Listar nombres de categorías
+                nombres_categorias = [cat.get("nombre", "") for cat in categorias if cat.get("nombre")]
+                if nombres_categorias:
+                    cat_text = ", ".join(nombres_categorias)
+                    description_parts.append(f"Categorías: {cat_text}.")
+                
+                # Agregar descripciones de ilustraciones de todas las categorías
+                for categoria in categorias:
+                    ilustraciones = categoria.get("ilustraciones", [])
+                    total_ilustraciones += len(ilustraciones)
+                    
+                    # Agregar descripciones de las primeras ilustraciones (máximo 5 en total)
+                    for ilustracion in ilustraciones[:5]:
+                        titulo_obra = ilustracion.get("titulo")
+                        desc_obra = ilustracion.get("descripcion")
+                        
+                        if titulo_obra or desc_obra:
+                            parts = []
+                            if titulo_obra:
+                                parts.append(f"'{titulo_obra}'")
+                            if desc_obra:
+                                parts.append(desc_obra)
+                            description_parts.append(f"Obra: {' - '.join(parts)}.")
+                
+                if total_ilustraciones > 0:
+                    description_parts.append(f"Portafolio con {total_ilustraciones} ilustraciones en total.")
             
             semantic_description = " ".join(description_parts)
             
@@ -212,8 +209,8 @@ class PortafolioServiceClient:
         except Exception as e:
             logger.error(f"Error building artist description: {e}, portafolio={portafolio}")
             # Retornar una descripción básica en caso de error
-            nombre = portafolio.get("nombreIlustrador") or portafolio.get("nombre", "Artista")
-            return f"Ilustrador profesional: {nombre}"
+            titulo = portafolio.get("titulo", "Artista")
+            return f"Ilustrador profesional: {titulo}"
 
 
 # Instancia global del cliente
